@@ -5,103 +5,125 @@ from bs4 import BeautifulSoup
 from datetime import datetime
 from telegram import Bot
 
+# Hämtar konfiguration från GitHub Secrets
 TOKEN = os.getenv('TELEGRAM_TOKEN')
 CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 
 def get_day_info():
+    """Returnerar index (0-4) och både svenskt och engelskt namn för dagen."""
     days_sv = ["Måndag", "Tisdag", "Onsdag", "Torsdag", "Fredag"]
+    days_en = ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY"]
     idx = datetime.now().weekday()
-    return (idx, days_sv[idx]) if idx < 5 else (None, None)
+    if idx < 5:
+        return idx, days_sv[idx], days_en[idx]
+    return None, None, None
 
-def scrape_gabys():
+def scrape_gabys(day_en):
+    """Skrapar Gaby's meny baserat på engelska veckodagar."""
     try:
         url = "https://jacyzhotel.com/restauranger-goteborg/gabys/"
-        # Jacy'z blockerar ofta enkla scripts, vi låtsas vara en webbläsare
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
         res = requests.get(url, timeout=15, headers=headers)
         res.encoding = 'utf-8'
         soup = BeautifulSoup(res.text, 'html.parser')
         
-        _, day_name = get_day_info()
-        
-        # Vi letar i ALL text på sidan och delar upp den i rader
-        lines = [line.strip() for line in soup.get_text(separator="\n").split("\n") if len(line.strip()) > 5]
+        # Enligt din inspect-bild ligger dagarna i 'span' eller 'p' taggar
+        # Vi letar efter alla element som kan innehålla text
+        elements = soup.find_all(['span', 'p', 'h3', 'div'])
         
         menu = []
         found_day = False
-        for line in lines:
-            # Letar efter t.ex. "TORSDAG" eller "Torsdag"
-            if day_name.upper() in line.upper():
+        all_days_en = ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY"]
+
+        for el in elements:
+            text = el.get_text(strip=True)
+            if not text:
+                continue
+
+            # Kolla om vi har hittat rätt dag (t.ex. "MONDAY")
+            if text.upper() == day_en:
                 found_day = True
                 continue
-            if found_day:
-                # Sluta om vi når nästa veckodag
-                if any(d in line.upper() for d in ["TISDAG", "ONSDAG", "TORSDAG", "FREDAG", "LÖRDAG"]):
-                    break
-                # Lägg till raden om den ser ut som en maträtt (inte bara ett pris eller kort ord)
-                if len(line) > 15:
-                    menu.append(f"• {line}")
-        
-        return "\n".join(menu[:4]) if menu else "🍴 Buffé serveras (se hemsidan för detaljer)."
-    except Exception as e:
-        return f"⚠️ Gaby's: Kunde inte läsa sidan ({str(e)})"
 
-def scrape_matsmak():
+            if found_day:
+                # Om vi stöter på en annan veckodag, sluta skrapa
+                if any(d == text.upper() for d in all_days_en if d != day_en):
+                    break
+                
+                # Lägg till rader som ser ut som maträtter (längre än 10 tecken)
+                if len(text) > 10 and not any(d in text.upper() for d in all_days_en):
+                    menu.append(f"• {text}")
+        
+        # Returnera max 4 rätter för att hålla meddelandet kompakt
+        return "\n".join(menu[:4]) if menu else "🍴 Se menyn på Jacy'z hemsida."
+    except Exception as e:
+        return f"⚠️ Kunde inte hämta Gaby's: {e}"
+
+def scrape_matsmak(day_sv):
+    """Skrapar Matsmak baserat på svenska veckodagar."""
     try:
         url = "https://matsmak.se/lunch/"
-        res = requests.get(url, timeout=15, headers={'User-Agent': 'Mozilla/5.0'})
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        res = requests.get(url, timeout=15, headers=headers)
         res.encoding = 'utf-8'
         soup = BeautifulSoup(res.text, 'html.parser')
         
-        _, day_name = get_day_info()
-        
-        # Matsmak har ofta sin meny i en specifik div
-        content = soup.find('div', class_='entry-content') or soup
-        lines = [line.strip() for line in content.get_text(separator="\n").split("\n") if len(line.strip()) > 5]
+        lines = [l.strip() for l in soup.get_text(separator="\n").split('\n') if len(l.strip()) > 5]
         
         menu = []
         found_day = False
+        all_days_sv = ["MÅNDAG", "TISDAG", "ONSDAG", "TORSDAG", "FREDAG"]
+
         for line in lines:
-            if day_name.upper() in line.upper():
+            if day_sv.upper() in line.upper():
                 found_day = True
                 continue
             if found_day:
-                if any(d in line.upper() for d in ["TISDAG", "ONSDAG", "TORSDAG", "FREDAG"]):
+                if any(d in line.upper() for d in all_days_sv if d != day_sv.upper()):
                     break
                 menu.append(f"• {line}")
         
-        return "\n".join(menu) if menu else "⚠️ Ingen meny publicerad för idag."
+        return "\n".join(menu) if menu else "⚠️ Menyn ej uppdaterad på sajten."
     except Exception as e:
-        return f"⚠️ Matsmak: Fel vid hämtning ({str(e)})"
+        return f"⚠️ Matsmak fel: {e}"
 
 async def main():
-    day_idx, day_name = get_day_info()
-    if day_idx is None: return 
+    day_idx, day_sv, day_en = get_day_info()
+    if day_idx is None:
+        print("Det är helg!")
+        return 
     
+    # Debug-utskrifter för GitHub Actions loggar
+    print(f"--- STARTAR LUNCHBOT FÖR {day_sv.upper()} ---")
+    
+    try:
+        target_id = int(str(CHAT_ID).strip())
+        print(f"Använder Chat ID: {target_id}")
+    except Exception as e:
+        print(f"Kritisk Error: Ogiltigt Chat ID '{CHAT_ID}': {e}")
+        return
+
     bot = Bot(token=TOKEN)
     
-    # Kör de nya, förbättrade funktionerna
-    gabys = scrape_gabys()
-    matsmak = scrape_matsmak()
+    # Hämta menyer
+    gabys_text = scrape_gabys(day_en)
+    matsmak_text = scrape_matsmak(day_sv)
     
     msg = (
-        f"🏙️ *GÅRDA LUNCH - {day_name.upper()}* 🏙️\n\n"
-        f"🍸 *Gaby's (Jacy'z)*\n{gabys}\n\n"
-        f"🍲 *Matsmak*\n{matsmak}\n\n"
+        f"🏙️ *GÅRDA LUNCH - {day_sv.upper()}* 🏙️\n\n"
+        f"🍸 *Gaby's (Jacy'z)*\n{gabys_text}\n\n"
+        f"🍲 *Matsmak*\n{matsmak_text}\n\n"
         f"🏘️ *The Village*\n📍 [Se länk](https://www.compass-group.se/restauranger-och-menyer/ovriga-restauranger/village/)\n\n"
         f"🍽️ *Hildas*\n📍 [Se länk](https://hildasrestaurang.se/se/lunch-meny)\n\n"
         "--- \n"
         "Smaklig lunch!"
     )
     
-    # Tvinga Chat ID till siffra (viktigt!)
-    target_id = int(str(CHAT_ID).strip())
-    
     try:
         await bot.send_message(chat_id=target_id, text=msg, parse_mode='Markdown', disable_web_page_preview=True)
-    except:
-        # Fallback om specialtecken från menyerna pajar Markdown
-        await bot.send_message(chat_id=target_id, text=msg.replace('*', '').replace('_', ''))
+        print("✅ Success: Meddelande skickat!")
+    except Exception as e:
+        print(f"❌ Misslyckades att skicka: {e}")
 
 if __name__ == "__main__":
     asyncio.run(main())
