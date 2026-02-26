@@ -5,7 +5,7 @@ from bs4 import BeautifulSoup
 from datetime import datetime
 from telegram import Bot
 
-# Läser in konfiguration
+# Hämta värden från miljön
 TOKEN = os.getenv('TELEGRAM_TOKEN')
 CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 
@@ -20,7 +20,6 @@ def scrape_site(url, day_name):
         res.encoding = 'utf-8'
         soup = BeautifulSoup(res.text, 'html.parser')
         lines = [l.strip() for l in soup.get_text(separator="\n").split('\n') if len(l.strip()) > 8]
-        
         menu = []
         found_day = False
         for line in lines:
@@ -28,7 +27,8 @@ def scrape_site(url, day_name):
                 found_day = True
                 continue
             if found_day:
-                if any(d in line.upper() for d in ["TISDAG", "ONSDAG", "TORSDAG", "FREDAG", "LÖRDAG"]):
+                next_days = ["TISDAG", "ONSDAG", "TORSDAG", "FREDAG", "LÖRDAG"]
+                if any(d in line.upper() for d in next_days if d != day_name.upper()):
                     break
                 menu.append(f"• {line}")
         return "\n".join(menu[:4]) if menu else None
@@ -36,18 +36,33 @@ def scrape_site(url, day_name):
         return None
 
 async def main():
-    day_idx, day_name = get_day_info()
-    if day_idx is None: return 
+    print("--- STARTAR LUNCHBOT ---")
     
-    # Säkerställ att ID är en siffra (viktigt för Telegram API)
+    # 1. Kontrollera att secrets finns
+    if not TOKEN:
+        print("❌ FEL: TELEGRAM_TOKEN saknas!")
+        return
+    if not CHAT_ID:
+        print("❌ FEL: TELEGRAM_CHAT_ID saknas!")
+        return
+
+    # 2. Tvinga ID till rätt format
     try:
-        target_chat = int(str(CHAT_ID).replace(" ", ""))
-        print(f"Försöker skicka till ID: {target_chat}")
-    except:
-        print(f"Kritisk Error: Ogiltigt Chat ID: {CHAT_ID}")
+        # Vi tar bort eventuella mellanslag eller dolda tecken
+        target_id = int(str(CHAT_ID).strip())
+        print(f"✅ Försöker skicka till Chat ID: {target_id}")
+    except Exception as e:
+        print(f"❌ KRITISKT: CHAT_ID '{CHAT_ID}' kan inte läsas som en siffra! Fel: {e}")
         return
 
     bot = Bot(token=TOKEN)
+    day_idx, day_name = get_day_info()
+    
+    if day_idx is None:
+        print("Det är helg, skickar inget.")
+        return
+
+    # 3. Hämta maten
     gabys = scrape_site("https://jacyzhotel.com/restauranger-goteborg/gabys/", day_name) or "🍴 Se menyn på Jacy'z hemsida."
     matsmak = scrape_site("https://matsmak.se/lunch/", day_name) or "⚠️ Menyn ej uppdaterad på sajten."
     
@@ -61,11 +76,15 @@ async def main():
         "Smaklig lunch!"
     )
     
+    # 4. Skicka!
     try:
-        await bot.send_message(chat_id=target_chat, text=msg, parse_mode='Markdown', disable_web_page_preview=True)
-        print("✅ Success: Postat i gruppen!")
+        await bot.send_message(chat_id=target_id, text=msg, parse_mode='Markdown', disable_web_page_preview=True)
+        print("🚀 SUCCESS: Meddelandet har lämnat boten!")
     except Exception as e:
-        print(f"❌ ERROR från Telegram: {e}")
+        print(f"❌ TELEGRAM VÄGRADE SKICKA: {e}")
+        # Om felet är "Chat not found", testa att skicka utan -100 (bara för säkerhets skull)
+        if "Chat not found" in str(e):
+             print("Tips: Dubbelkolla att boten är ADMINISTRATÖR i gruppen.")
 
 if __name__ == "__main__":
     asyncio.run(main())
