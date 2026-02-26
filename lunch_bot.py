@@ -1,14 +1,27 @@
-def scrape_gabys():
+import asyncio
+import requests
+import os
+from bs4 import BeautifulSoup
+from datetime import datetime
+from telegram import Bot
+
+TOKEN = os.getenv('TELEGRAM_TOKEN')
+# Vi använder det korrekta grupp-ID:t med -100 prefixet
+CHAT_ID = os.getenv('TELEGRAM_CHAT_ID', '-1005107650458')
+
+def get_day_info():
+    days_sv = ["Måndag", "Tisdag", "Onsdag", "Torsdag", "Fredag"]
+    idx = datetime.now().weekday()
+    return (idx, days_sv[idx]) if idx < 5 else (None, None)
+
+def scrape_site(url, day_name):
     try:
-        url = "https://jacyzhotel.com/restauranger-goteborg/gabys/"
-        # Vi lägger till en User-Agent för att se ut som en vanlig webbläsare
         res = requests.get(url, timeout=15, headers={'User-Agent': 'Mozilla/5.0'})
+        res.encoding = 'utf-8'
         soup = BeautifulSoup(res.text, 'html.parser')
-        _, day_name = get_day_info()
         
-        # Vi hämtar all text och letar efter rader som kommer efter dagens namn
-        text_content = soup.get_text(separator="\n", strip=True)
-        lines = text_content.split('\n')
+        # Hämta all text och rensa bort tomma rader
+        lines = [l.strip() for l in soup.get_text(separator="\n").split('\n') if len(l.strip()) > 8]
         
         menu = []
         found_day = False
@@ -17,39 +30,44 @@ def scrape_gabys():
                 found_day = True
                 continue
             if found_day:
-                # Om raden är för kort eller innehåller nästa dag, sluta
+                # Stoppa om vi når nästa dag
                 if any(d in line.upper() for d in ["TISDAG", "ONSDAG", "TORSDAG", "FREDAG", "LÖRDAG"]):
                     break
-                if len(line) > 10: # En rimlig maträtt är oftast längre än 10 tecken
-                    menu.append(f"• {line}")
+                menu.append(f"• {line}")
         
-        return "\n".join(menu[:3]) if menu else "🍴 Buffé/Meny finns på plats. Se länk!"
+        return "\n".join(menu[:4]) if menu else None
     except:
-        return "❌ Kunde inte nå Jacy'z sajt just nu."
+        return None
 
-def scrape_matsmak():
+async def main():
+    day_idx, day_name = get_day_info()
+    if day_idx is None: 
+        print("Det är helg!")
+        return 
+    
+    bot = Bot(token=TOKEN)
+    
+    # Kör scraping
+    gabys = scrape_site("https://jacyzhotel.com/restauranger-goteborg/gabys/", day_name) or "🍴 Se menyn på Jacy'z hemsida."
+    matsmak = scrape_site("https://matsmak.se/lunch/", day_name) or "⚠️ Menyn ej uppdaterad på sajten."
+    
+    msg = (
+        f"🏙️ *GÅRDA LUNCH - {day_name.upper()}* 🏙️\n\n"
+        f"🍸 *Gaby's (Jacy'z)*\n{gabys}\n\n"
+        f"🍲 *Matsmak*\n{matsmak}\n\n"
+        f"🏘️ *The Village*\n📍 [Se menyn här](https://www.compass-group.se/restauranger-och-menyer/ovriga-restauranger/village/)\n\n"
+        f"🍽️ *Hildas*\n📍 [Se menyn här](https://hildasrestaurang.se/se/lunch-meny)\n\n"
+        "--- \n"
+        "Smaklig lunch!"
+    )
+    
     try:
-        url = "https://matsmak.se/lunch/"
-        res = requests.get(url, timeout=15, headers={'User-Agent': 'Mozilla/5.0'})
-        soup = BeautifulSoup(res.text, 'html.parser')
-        _, day_name = get_day_info()
+        await bot.send_message(chat_id=CHAT_ID, text=msg, parse_mode='Markdown', disable_web_page_preview=True)
+        print("Meddelande skickat!")
+    except Exception as e:
+        # Fallback utan Markdown om specialtecken ställer till det
+        await bot.send_message(chat_id=CHAT_ID, text=msg.replace('*', ''))
+        print(f"Skickat med fallback pga: {e}")
 
-        # Matsmak har ibland rätterna i 'p'-taggar efter en rubrik
-        all_text = soup.get_text(separator="\n", strip=True)
-        lines = all_text.split('\n')
-        
-        menu = []
-        capture = False
-        for line in lines:
-            if day_name.upper() in line.upper():
-                capture = True
-                continue
-            if capture:
-                if any(d in line.upper() for d in ["TISDAG", "ONSDAG", "TORSDAG", "FREDAG"]):
-                    break
-                if len(line) > 15:
-                    menu.append(f"• {line}")
-        
-        return "\n".join(menu) if menu else "⚠️ Menyn ej uppdaterad på sajten."
-    except:
-        return "❌ Kunde inte nå Matsmak."
+if __name__ == "__main__":
+    asyncio.run(main())
