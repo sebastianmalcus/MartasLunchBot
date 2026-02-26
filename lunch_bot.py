@@ -5,9 +5,9 @@ from bs4 import BeautifulSoup
 from datetime import datetime
 from telegram import Bot
 
+# Hämtar från GitHub Secrets
 TOKEN = os.getenv('TELEGRAM_TOKEN')
-# Vi använder det korrekta grupp-ID:t med -100 prefixet
-CHAT_ID = os.getenv('TELEGRAM_CHAT_ID', '-1005107650458')
+CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 
 def get_day_info():
     days_sv = ["Måndag", "Tisdag", "Onsdag", "Torsdag", "Fredag"]
@@ -31,7 +31,8 @@ def scrape_site(url, day_name):
                 continue
             if found_day:
                 # Stoppa om vi når nästa dag
-                if any(d in line.upper() for d in ["TISDAG", "ONSDAG", "TORSDAG", "FREDAG", "LÖRDAG"]):
+                next_days = ["TISDAG", "ONSDAG", "TORSDAG", "FREDAG", "LÖRDAG"]
+                if any(d in line.upper() for d in next_days if d != day_name.upper()):
                     break
                 menu.append(f"• {line}")
         
@@ -47,6 +48,15 @@ async def main():
     
     bot = Bot(token=TOKEN)
     
+    # TVINGA ID-NUMRET TILL INTEGER (Fixar "Chat not found" om GitHub skickar sträng)
+    try:
+        # Tar bort eventuella mellanslag och gör till siffra
+        target_id = int(str(CHAT_ID).strip())
+        print(f"DEBUG: Försöker skicka till Chat ID: {target_id}")
+    except Exception as e:
+        print(f"Kritisk Error: CHAT_ID '{CHAT_ID}' är inte ett giltigt nummer: {e}")
+        return
+
     # Kör scraping
     gabys = scrape_site("https://jacyzhotel.com/restauranger-goteborg/gabys/", day_name) or "🍴 Se menyn på Jacy'z hemsida."
     matsmak = scrape_site("https://matsmak.se/lunch/", day_name) or "⚠️ Menyn ej uppdaterad på sajten."
@@ -62,12 +72,8 @@ async def main():
     )
     
     try:
-        await bot.send_message(chat_id=CHAT_ID, text=msg, parse_mode='Markdown', disable_web_page_preview=True)
-        print("Meddelande skickat!")
+        await bot.send_message(chat_id=target_id, text=msg, parse_mode='Markdown', disable_web_page_preview=True)
+        print("Success: Meddelande skickat till gruppen!")
     except Exception as e:
-        # Fallback utan Markdown om specialtecken ställer till det
-        await bot.send_message(chat_id=CHAT_ID, text=msg.replace('*', ''))
-        print(f"Skickat med fallback pga: {e}")
-
-if __name__ == "__main__":
-    asyncio.run(main())
+        print(f"Misslyckades att skicka med Markdown: {e}")
+        # Sista försöket utan formatering
