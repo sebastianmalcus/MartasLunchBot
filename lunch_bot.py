@@ -20,7 +20,6 @@ def get_day_info():
     return None, None, None
 
 def get_session():
-    """Skapar en request-session som automatiskt försöker igen om sidan är seg/strular."""
     session = requests.Session()
     retries = Retry(total=3, backoff_factor=1, status_forcelist=[500, 502, 503, 504])
     session.mount('https://', HTTPAdapter(max_retries=retries))
@@ -118,62 +117,39 @@ def scrape_village(day_sv):
     except Exception: return "⚠️ Systemfel på The Village."
 
 def scrape_hildas(day_sv):
-    """Debug-läge och en extremt grundläggande text-skrapning för Hildas."""
+    """SUPER-DEBUG: Skriver ut källkoden runt dagens namn för att se om maten gömmer sig i en data-tagg eller JSON."""
     try:
         url = "https://hildasrestaurang.se/se/lunch-meny"
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
         res = get_session().get(url, timeout=15, headers=headers)
         res.raise_for_status()
         res.encoding = 'utf-8'
-        soup = BeautifulSoup(res.text, 'html.parser')
 
-        # --- GITHUB ACTIONS DEBUGGING ---
-        print("\n" + "="*40)
-        print(f"🕵️ DEBUG HILDAS FÖR: {day_sv.upper()}")
-        print("="*40)
-        if day_sv.upper() in res.text.upper():
-            print(f"✅ Ordet '{day_sv}' FINNS i den råa källkoden!")
+        raw_html = res.text
+        
+        print("\n" + "="*60)
+        print(f"🕵️ SUPER DEBUG HILDAS FÖR: {day_sv.upper()}")
+        print("="*60)
+        
+        # Sök efter dagen (t.ex. "Fredag")
+        idx = raw_html.upper().find(day_sv.upper())
+        
+        if idx != -1:
+            # Plocka ut lite kod före och mycket kod efter ordet
+            start = max(0, idx - 300)
+            end = min(len(raw_html), idx + 3000)
+            print(f"✅ Hittade '{day_sv}'! Här är exakt vad boten ser i koden:")
+            print("\n[--- BÖRJAN AV RÅKOD ---]")
+            print(raw_html[start:end])
+            print("[--- SLUT PÅ RÅKOD ---]\n")
         else:
-            print(f"❌ Ordet '{day_sv}' SAKNAS HELT i råkoden. Datan laddas via API/JS.")
+            print(f"❌ Hittade inte '{day_sv}' i källkoden överhuvudtaget.")
             
-        test_word = soup.find(string=lambda t: t and "Fläskkött" in t)
-        if test_word:
-            print(f"✅ Hittade ordet 'Fläskkött'. Dess omslutande tagg är:\n{test_word.find_parent()}")
-        else:
-            print("❌ Hittade inte ens ordet 'Fläskkött' i källkoden.")
-        print("="*40 + "\n")
-        # --------------------------------
+        print("="*60 + "\n")
 
-        menu = []
-        # Fallback: Den dummaste men mest robusta metoden. Plocka all ren text på sidan.
-        lines = [line.strip() for line in soup.get_text(separator="\n").split("\n") if line.strip()]
-        found_day = False
-        all_days = ["MÅNDAG", "TISDAG", "ONSDAG", "TORSDAG", "FREDAG"]
-
-        for line in lines:
-            line_upper = line.upper()
-            # Om raden är "FREDAG" eller "KEBABFREDAG" etc.
-            if day_sv.upper() in line_upper and len(line) < 20:
-                found_day = True
-                continue
-                
-            if found_day:
-                # Avbryt om vi springer in i en annan veckodag
-                if any(d == line_upper for d in all_days if d != day_sv.upper()):
-                    break
-                    
-                # Rensa skräp och lägg till
-                if len(line) > 5 and "Kcal" not in line and "Allergi" not in line:
-                    if len(line) <= 15: # Antagligen en rubrik typ "Fläskkött"
-                        menu.append(f"\n*{line}*")
-                    else:
-                        menu.append(f"• {line}")
-                        
-                # Max 10 rader så vi inte får in hela sidfoten
-                if len(menu) > 10:
-                    break
-
-        return "\n".join(menu).strip() if menu else "⚠️ Hittade inte dagens meny på Hildas."
+        # Boten returnerar detta till Telegram så länge vi debuggar
+        return "⚠️ Söker efter den dolda koden. Kolla GitHub Actions-loggen!"
+        
     except Exception as e:
         return f"⚠️ Systemfel på Hildas: {e}"
 
