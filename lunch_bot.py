@@ -148,7 +148,7 @@ def scrape_village(day_sv):
         return "⚠️ Systemfel på The Village."
 
 def scrape_hildas(day_sv):
-    """Skrapar Hildas genom att använda header_wrapper för att hitta rätt dag."""
+    """Skrapar Hildas exakt utifrån Inspect-bilden med header_wrapper."""
     try:
         url = "https://hildasrestaurang.se/se/lunch-meny"
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
@@ -159,7 +159,7 @@ def scrape_hildas(day_sv):
 
         menu = []
         
-        # 1. Leta upp alla header_wrappers på sidan
+        # 1. Leta upp alla header_wrappers (lådan där veckodagen står)
         header_wrappers = soup.find_all('div', class_='header_wrapper')
         
         for hw in header_wrappers:
@@ -168,31 +168,31 @@ def scrape_hildas(day_sv):
             # 2. Kolla om denna header_wrapper tillhör vår aktuella dag (t.ex. FREDAG)
             if h3 and day_sv.upper() in h3.get_text(strip=True).upper():
                 
-                # 3. Perfekt! Klättra upp till själva huvudlådan (menu_wrapper)
-                wrapper = hw.find_parent('div', class_='menu_wrapper')
-                if not wrapper:
-                    continue
+                # 3. Vi backar ut till huvudlådan som innehåller både header och mat
+                parent_block = hw.parent
                 
-                # 4. Hämta maten från denna låda med klasserna från din bild
-                titles = wrapper.find_all('p', class_='menus_title')
-                contents = wrapper.find_all('p', class_='menus_content')
+                # 4. Hämta maten! Titlarna ("Fläskkött") och innehållet ("Kebabkryddad...")
+                titles = parent_block.find_all('p', class_='menus_title')
+                contents = parent_block.find_all('p', class_='menus_content')
                 
-                # Para ihop dem
                 if titles and contents:
+                    # Para ihop rubrik med rätt
                     for t, c in zip(titles, contents):
                         t_text = t.get_text(strip=True)
                         c_text = c.get_text(strip=True)
                         if c_text:
-                            # Sätter *Fläskkött:* i fetstil!
+                            # Formaterar titeln i fetstil (*)
                             menu.append(f"• *{t_text}:* {c_text}")
                 else:
-                    # Nödlösning om klasserna saknas
-                    for p in wrapper.find_all('p'):
-                        p_text = p.get_text(strip=True)
-                        if len(p_text) > 10 and day_sv.upper() not in p_text.upper():
-                            menu.append(f"• {p_text}")
+                    # Nödlösning: Plocka all text från blocket nedanför rubriken
+                    sibling = hw.find_next_sibling()
+                    if sibling:
+                        for p in sibling.find_all('p'):
+                            p_text = p.get_text(strip=True)
+                            if len(p_text) > 5:
+                                menu.append(f"• {p_text}")
                 
-                # När vi hittat dagens meny, bryt direkt (undviker slider-dubbletter)
+                # Sidan använder en slider med dubbletter, avbryt när vi fyllt vår meny!
                 if menu:
                     break
                 
@@ -233,7 +233,7 @@ async def main():
         await bot.send_message(chat_id=target_id, text=msg, parse_mode='Markdown', disable_web_page_preview=True)
         print("✅ Success: Skickat med alla fyra restauranger!")
     except Exception:
-        # Fallback om formateringen spricker
+        # Fallback om formateringen (fetstil) spricker
         await bot.send_message(chat_id=target_id, text=msg.replace('*', ''))
 
 if __name__ == "__main__":
