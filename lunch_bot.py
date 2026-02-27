@@ -57,13 +57,12 @@ def scrape_gabys(day_en):
 
 def scrape_matsmak(day_sv):
     try:
-        url = "https://matsmak.se/lunch/"
-        # Uppdaterad och kraftfullare User-Agent för att undvika blockeringar
+        # HÄR ÄR DEN RÄTTADE URL:EN
+        url = "https://matsmak.se/dagens-lunch/"
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
         }
         res = requests.get(url, timeout=15, headers=headers)
-        # Säg till om vi blir blockerade av servern (t.ex. 403 Forbidden)
         res.raise_for_status() 
         
         res.encoding = 'utf-8'
@@ -77,7 +76,6 @@ def scrape_matsmak(day_sv):
             if strong_text.startswith(day_sv.upper()):
                 parent_block = strong.parent
                 
-                # Om parent_block är null (osannolikt, men säkrast att kolla)
                 if not parent_block:
                     continue
                     
@@ -102,7 +100,6 @@ def scrape_matsmak(day_sv):
                     
         return "\n".join(menu) if menu else "⚠️ Hittade inte dagens rubrik på Matsmak."
     except Exception as e:
-        # Nu skickar vi det EXAKTA felmeddelandet till chatten så vi slipper gissa
         return f"⚠️ Systemfel på Matsmak: {e}"
 
 async def main():
