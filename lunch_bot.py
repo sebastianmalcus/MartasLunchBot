@@ -67,14 +67,12 @@ def scrape_gabys(day_en):
 def scrape_matsmak(day_sv):
     try:
         url = "https://matsmak.se/dagens-lunch/"
-        # Fler headers för att lura webbhotellets brandvägg
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
             'Accept-Language': 'sv-SE,sv;q=0.9,en-US;q=0.8,en;q=0.7'
         }
         
-        # Vi använder vår custom session med upp till 20s timeout
         res = get_session().get(url, timeout=20, headers=headers)
         res.raise_for_status() 
         res.encoding = 'utf-8'
@@ -150,7 +148,7 @@ def scrape_village(day_sv):
         return "⚠️ Systemfel på The Village."
 
 def scrape_hildas(day_sv):
-    """Skrapar Hildas genom att suga ut all text från rätt 'menu_wrapper' istället för specifika taggar."""
+    """Skrapar Hildas genom att använda header_wrapper för att hitta rätt dag."""
     try:
         url = "https://hildasrestaurang.se/se/lunch-meny"
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
@@ -160,33 +158,47 @@ def scrape_hildas(day_sv):
         soup = BeautifulSoup(res.text, 'html.parser')
 
         menu = []
-        wrappers = soup.find_all('div', class_='menu_wrapper')
         
-        for wrapper in wrappers:
-            # Plocka ut all text från lådan med radbrytningar
-            text = wrapper.get_text(separator="\n", strip=True)
-            lines = [l.strip() for l in text.split('\n') if len(l.strip()) > 1]
+        # 1. Leta upp alla header_wrappers på sidan
+        header_wrappers = soup.find_all('div', class_='header_wrapper')
+        
+        for hw in header_wrappers:
+            h3 = hw.find('h3')
             
-            # Kolla om dagens namn (t.ex. FREDAG) finns i början av blocket
-            if lines and any(day_sv.upper() in l.upper() for l in lines[:2]):
+            # 2. Kolla om denna header_wrapper tillhör vår aktuella dag (t.ex. FREDAG)
+            if h3 and day_sv.upper() in h3.get_text(strip=True).upper():
                 
-                # Hoppa över själva rubriken ("Fredag")
-                start_idx = 1 if day_sv.upper() in lines[0].upper() else 2
+                # 3. Perfekt! Klättra upp till själva huvudlådan (menu_wrapper)
+                wrapper = hw.find_parent('div', class_='menu_wrapper')
+                if not wrapper:
+                    continue
                 
-                for line in lines[start_idx:]:
-                    # Om raden är kort (som "Kött" eller "Veganskt"), gör den till en kategori-rubrik
-                    if len(line) <= 15 and "Kcal" not in line:
-                        menu.append(f"\n*{line}*")
-                    else:
-                        menu.append(f"• {line}")
+                # 4. Hämta maten från denna låda med klasserna från din bild
+                titles = wrapper.find_all('p', class_='menus_title')
+                contents = wrapper.find_all('p', class_='menus_content')
                 
-                # När vi hittat dagens meny, avbryt för att undvika dubbletter
+                # Para ihop dem
+                if titles and contents:
+                    for t, c in zip(titles, contents):
+                        t_text = t.get_text(strip=True)
+                        c_text = c.get_text(strip=True)
+                        if c_text:
+                            # Sätter *Fläskkött:* i fetstil!
+                            menu.append(f"• *{t_text}:* {c_text}")
+                else:
+                    # Nödlösning om klasserna saknas
+                    for p in wrapper.find_all('p'):
+                        p_text = p.get_text(strip=True)
+                        if len(p_text) > 10 and day_sv.upper() not in p_text.upper():
+                            menu.append(f"• {p_text}")
+                
+                # När vi hittat dagens meny, bryt direkt (undviker slider-dubbletter)
                 if menu:
                     break
                 
-        return "\n".join(menu).strip() if menu else "⚠️ Hittade inte dagens meny på Hildas."
+        return "\n".join(menu) if menu else "⚠️ Hittade inte dagens meny på Hildas."
     except Exception as e:
-        return "⚠️ Systemfel på Hildas."
+        return f"⚠️ Systemfel på Hildas: {e}"
 
 async def main():
     day_idx, day_sv, day_en = get_day_info()
