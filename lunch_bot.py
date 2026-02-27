@@ -20,6 +20,7 @@ def get_day_info():
     return None, None, None
 
 def get_session():
+    """Skapar en request-session som automatiskt försöker igen om sidan är seg/strular."""
     session = requests.Session()
     retries = Retry(total=3, backoff_factor=1, status_forcelist=[500, 502, 503, 504])
     session.mount('https://', HTTPAdapter(max_retries=retries))
@@ -151,4 +152,62 @@ def scrape_hildas(day_sv):
 
         for line in lines:
             line_upper = line.upper()
-            # Om raden är "
+            # Om raden är "FREDAG" eller "KEBABFREDAG" etc.
+            if day_sv.upper() in line_upper and len(line) < 20:
+                found_day = True
+                continue
+                
+            if found_day:
+                # Avbryt om vi springer in i en annan veckodag
+                if any(d == line_upper for d in all_days if d != day_sv.upper()):
+                    break
+                    
+                # Rensa skräp och lägg till
+                if len(line) > 5 and "Kcal" not in line and "Allergi" not in line:
+                    if len(line) <= 15: # Antagligen en rubrik typ "Fläskkött"
+                        menu.append(f"\n*{line}*")
+                    else:
+                        menu.append(f"• {line}")
+                        
+                # Max 10 rader så vi inte får in hela sidfoten
+                if len(menu) > 10:
+                    break
+
+        return "\n".join(menu).strip() if menu else "⚠️ Hittade inte dagens meny på Hildas."
+    except Exception as e:
+        return f"⚠️ Systemfel på Hildas: {e}"
+
+async def main():
+    day_idx, day_sv, day_en = get_day_info()
+    if day_idx is None: return 
+    
+    bot = Bot(token=TOKEN)
+    
+    try:
+        target_id = int(str(CHAT_ID).strip())
+    except Exception:
+        print("Kritisk Error: Ogiltigt Chat ID")
+        return
+
+    gabys_text = scrape_gabys(day_en)
+    matsmak_text = scrape_matsmak(day_sv)
+    village_text = scrape_village(day_sv)
+    hildas_text = scrape_hildas(day_sv)
+    
+    msg = (
+        f"🏙️ *GÅRDA LUNCH - {day_sv.upper()}* 🏙️\n\n"
+        f"🍸 *Gaby's (Jacy'z)*\n{gabys_text}\n\n"
+        f"🍲 *Matsmak*\n{matsmak_text}\n\n"
+        f"🏘️ *The Village*\n{village_text}\n\n"
+        f"🍽️ *Hildas*\n{hildas_text}\n\n"
+        "--- \n"
+        "Smaklig lunch!"
+    )
+    
+    try:
+        await bot.send_message(chat_id=target_id, text=msg, parse_mode='Markdown', disable_web_page_preview=True)
+    except Exception:
+        await bot.send_message(chat_id=target_id, text=msg.replace('*', ''))
+
+if __name__ == "__main__":
+    asyncio.run(main())
