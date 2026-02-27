@@ -45,7 +45,7 @@ def scrape_gabys(day_en):
                     menu.append(f"• {text}")
         
         return "\n".join(menu[:4]) if menu else "🍴 Se menyn på Jacy'z hemsida."
-    except:
+    except Exception:
         return "⚠️ Gaby's: Kunde inte nå sidan."
 
 def scrape_matsmak(day_sv):
@@ -57,8 +57,8 @@ def scrape_matsmak(day_sv):
         res.encoding = 'utf-8'
         soup = BeautifulSoup(res.text, 'html.parser')
         
-        # Matsmak använder <br> för radbrytningar inuti <p>.
-        # separator="\n" gör att vi får ut rätterna rad för rad.
+        # Matsmak använder <br> för radbrytningar inuti <p>. 
+        # separator="\n" gör att vi får ut rätterna som separata rader.
         content = soup.find('div', class_='entry-content') or soup
         all_text = content.get_text(separator="\n", strip=True)
         lines = [l.strip() for l in all_text.split('\n') if len(l.strip()) > 1]
@@ -78,20 +78,20 @@ def scrape_matsmak(day_sv):
                 if line.upper() in all_days_sv:
                     break
                 
-                # Prefix från din senaste skärmdump
-                prefixes = ["KÖTT:", "FISK:", "VEG:", "BUDGET:", "VECKANS:", "VEG:"]
+                # Prefix från din senaste skärmdump (nu inkluderat BUDGET)
+                prefixes = ["KÖTT:", "FISK:", "VEG:", "BUDGET:", "VECKANS:"]
                 
-                # Tvätta texten från specialtecken (som non-breaking spaces)
+                # Tvätta texten från specialtecken (non-breaking spaces)
                 clean_line = line.replace('\xa0', ' ')
                 
                 if any(p in clean_line.upper() for p in prefixes):
                     menu.append(f"• {clean_line}")
-                # Fångar rader som är tydliga maträtter men saknar prefix (minst 20 tecken)
-                elif len(clean_line) > 20 and ":" not in clean_line:
+                # Fångar rader som är tydliga maträtter men saknar prefix (minst 25 tecken)
+                elif len(clean_line) > 25 and ":" not in clean_line:
                     menu.append(f"• {clean_line}")
         
-        return "\n".join(menu) if menu else "⚠️ Hittade menyn men rätterna saknas."
-    except:
+        return "\n".join(menu) if menu else "⚠️ Hittade menyn men kunde inte extrahera rätterna."
+    except Exception:
         return "⚠️ Matsmak: Kunde inte nå sidan."
 
 async def main():
@@ -100,10 +100,11 @@ async def main():
     
     bot = Bot(token=TOKEN)
     
-    # Säkerställ att ID är en ren siffra för Telegram API
+    # Tvinga Chat ID till siffra för att undvika API-fel
     try:
         target_id = int(str(CHAT_ID).strip())
-    except:
+    except Exception:
+        print("Kritisk Error: Ogiltigt Chat ID")
         return
 
     gabys_text = scrape_gabys(day_en)
@@ -121,7 +122,8 @@ async def main():
     
     try:
         await bot.send_message(chat_id=target_id, text=msg, parse_mode='Markdown', disable_web_page_preview=True)
-    except:
+        print("✅ Success: Postat i gruppen!")
+    except Exception:
         # Fallback om specialtecken pajar Markdown-formateringen
         await bot.send_message(chat_id=target_id, text=msg.replace('*', ''))
 
