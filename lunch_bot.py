@@ -57,7 +57,6 @@ def scrape_gabys(day_en):
 
 def scrape_matsmak(day_sv):
     try:
-        # HÄR ÄR DEN RÄTTADE URL:EN
         url = "https://matsmak.se/dagens-lunch/"
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
@@ -102,6 +101,49 @@ def scrape_matsmak(day_sv):
     except Exception as e:
         return f"⚠️ Systemfel på Matsmak: {e}"
 
+def scrape_village(day_sv):
+    """Skrapar The Village genom att leta efter deras 'lunch-day'-block."""
+    try:
+        # Uppdaterad URL enligt din webbläsare
+        url = "https://www.compass-group.se/restauranger-och-menyer/ovriga-restauranger/village/village-restaurang/"
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+        res = requests.get(url, timeout=15, headers=headers)
+        res.raise_for_status()
+        res.encoding = 'utf-8'
+        soup = BeautifulSoup(res.text, 'html.parser')
+
+        menu = []
+        
+        # Leta efter alla element med klassen 'lunch-day' (enligt din bild)
+        day_blocks = soup.find_all('div', class_=lambda c: c and 'lunch-day' in c)
+        
+        # Om klassnamnet ändras, fallback till att leta efter h3-rubriker
+        if not day_blocks:
+            for h3 in soup.find_all(['h3', 'h2']):
+                if h3.get_text(strip=True).upper().startswith(day_sv.upper()):
+                    day_blocks = [h3.parent]
+                    break
+
+        for block in day_blocks:
+            # Plocka ut texten och tvinga radbrytningar
+            text = block.get_text(separator="\n", strip=True)
+            lines = [l.strip() for l in text.split('\n') if l.strip()]
+            
+            # Kolla om detta block är för rätt veckodag
+            if lines and lines[0].upper().startswith(day_sv.upper()):
+                for line in lines[1:]: # Skippa själva rubriken ("Fredag 2026-02-27")
+                    # Rensa bort deras statiska tids-information och korta rader
+                    if "LUNCH SERVERAS" in line.upper() or len(line) < 15:
+                        continue
+                    menu.append(f"• {line}")
+                break # Vi har hittat rätt dag, avbryt loopen
+                
+        return "\n".join(menu) if menu else "⚠️ Hittade inte dagens meny på The Village."
+    except Exception as e:
+        return f"⚠️ Systemfel på The Village: {e}"
+
 async def main():
     day_idx, day_sv, day_en = get_day_info()
     if day_idx is None: return 
@@ -114,14 +156,17 @@ async def main():
         print("Kritisk Error: Ogiltigt Chat ID")
         return
 
+    # Kör alla skrapor
     gabys_text = scrape_gabys(day_en)
     matsmak_text = scrape_matsmak(day_sv)
+    village_text = scrape_village(day_sv)
     
+    # Bygg ihop meddelandet (Nu med The Village inladdad!)
     msg = (
         f"🏙️ *GÅRDA LUNCH - {day_sv.upper()}* 🏙️\n\n"
         f"🍸 *Gaby's (Jacy'z)*\n{gabys_text}\n\n"
         f"🍲 *Matsmak*\n{matsmak_text}\n\n"
-        f"🏘️ *The Village*\n📍 [Se länk](https://www.compass-group.se/restauranger-och-menyer/ovriga-restauranger/village/)\n\n"
+        f"🏘️ *The Village*\n{village_text}\n\n"
         f"🍽️ *Hildas*\n📍 [Se länk](https://hildasrestaurang.se/se/lunch-meny)\n\n"
         "--- \n"
         "Smaklig lunch!"
