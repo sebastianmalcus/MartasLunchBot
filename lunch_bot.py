@@ -102,24 +102,17 @@ def scrape_matsmak(day_sv):
         return f"⚠️ Systemfel på Matsmak: {e}"
 
 def scrape_village(day_sv):
-    """Skrapar The Village genom att leta efter deras 'lunch-day'-block."""
     try:
-        # Uppdaterad URL enligt din webbläsare
         url = "https://www.compass-group.se/restauranger-och-menyer/ovriga-restauranger/village/village-restaurang/"
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
         res = requests.get(url, timeout=15, headers=headers)
         res.raise_for_status()
         res.encoding = 'utf-8'
         soup = BeautifulSoup(res.text, 'html.parser')
 
         menu = []
-        
-        # Leta efter alla element med klassen 'lunch-day' (enligt din bild)
         day_blocks = soup.find_all('div', class_=lambda c: c and 'lunch-day' in c)
         
-        # Om klassnamnet ändras, fallback till att leta efter h3-rubriker
         if not day_blocks:
             for h3 in soup.find_all(['h3', 'h2']):
                 if h3.get_text(strip=True).upper().startswith(day_sv.upper()):
@@ -127,22 +120,64 @@ def scrape_village(day_sv):
                     break
 
         for block in day_blocks:
-            # Plocka ut texten och tvinga radbrytningar
             text = block.get_text(separator="\n", strip=True)
             lines = [l.strip() for l in text.split('\n') if l.strip()]
             
-            # Kolla om detta block är för rätt veckodag
             if lines and lines[0].upper().startswith(day_sv.upper()):
-                for line in lines[1:]: # Skippa själva rubriken ("Fredag 2026-02-27")
-                    # Rensa bort deras statiska tids-information och korta rader
+                for line in lines[1:]: 
                     if "LUNCH SERVERAS" in line.upper() or len(line) < 15:
                         continue
                     menu.append(f"• {line}")
-                break # Vi har hittat rätt dag, avbryt loopen
+                break 
                 
         return "\n".join(menu) if menu else "⚠️ Hittade inte dagens meny på The Village."
     except Exception as e:
         return f"⚠️ Systemfel på The Village: {e}"
+
+def scrape_hildas(day_sv):
+    """Skrapar Hildas genom att hitta deras menu_wrapper och p-taggar."""
+    try:
+        url = "https://hildasrestaurang.se/se/lunch-meny"
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        res = requests.get(url, timeout=15, headers=headers)
+        res.raise_for_status()
+        res.encoding = 'utf-8'
+        soup = BeautifulSoup(res.text, 'html.parser')
+
+        menu = []
+        # Hitta alla block som innehåller en dag
+        wrappers = soup.find_all('div', class_='menu_wrapper')
+        
+        for wrapper in wrappers:
+            h3 = wrapper.find('h3')
+            # Leta efter vår aktuella veckodag
+            if h3 and h3.get_text(strip=True).upper() == day_sv.upper():
+                
+                # Plocka ut titlar (t.ex. "Fläskkött") och innehåll (rätten)
+                titles = wrapper.find_all('p', class_='menus_title')
+                contents = wrapper.find_all('p', class_='menus_content')
+                
+                # Om de matchar i antal, klistra ihop dem snyggt!
+                if len(titles) == len(contents) and len(contents) > 0:
+                    for t, c in zip(titles, contents):
+                        t_text = t.get_text(strip=True)
+                        c_text = c.get_text(strip=True)
+                        if c_text:
+                            # *Gör titeln fetstilt* i Markdown
+                            menu.append(f"• *{t_text}:* {c_text}")
+                else:
+                    # Fallback om de gjort fel på hemsidan: plocka bara ut maten
+                    for c in contents:
+                        c_text = c.get_text(strip=True)
+                        if c_text:
+                            menu.append(f"• {c_text}")
+                
+                # Sidan använder en slider som skapar dubbletter, så när vi hittat EN onsdag avbryter vi!
+                break
+                
+        return "\n".join(menu) if menu else "⚠️ Hittade inte dagens meny på Hildas."
+    except Exception as e:
+        return f"⚠️ Systemfel på Hildas: {e}"
 
 async def main():
     day_idx, day_sv, day_en = get_day_info()
@@ -156,25 +191,28 @@ async def main():
         print("Kritisk Error: Ogiltigt Chat ID")
         return
 
-    # Kör alla skrapor
+    # Ladda ner alla menyer
     gabys_text = scrape_gabys(day_en)
     matsmak_text = scrape_matsmak(day_sv)
     village_text = scrape_village(day_sv)
+    hildas_text = scrape_hildas(day_sv)
     
-    # Bygg ihop meddelandet (Nu med The Village inladdad!)
+    # Det kompletta resultatet
     msg = (
         f"🏙️ *GÅRDA LUNCH - {day_sv.upper()}* 🏙️\n\n"
         f"🍸 *Gaby's (Jacy'z)*\n{gabys_text}\n\n"
         f"🍲 *Matsmak*\n{matsmak_text}\n\n"
         f"🏘️ *The Village*\n{village_text}\n\n"
-        f"🍽️ *Hildas*\n📍 [Se länk](https://hildasrestaurang.se/se/lunch-meny)\n\n"
+        f"🍽️ *Hildas*\n{hildas_text}\n\n"
         "--- \n"
         "Smaklig lunch!"
     )
     
     try:
         await bot.send_message(chat_id=target_id, text=msg, parse_mode='Markdown', disable_web_page_preview=True)
+        print("✅ Success: Skickat med alla fyra restauranger!")
     except Exception:
+        # Om Hildas nya *Fetstil* bråkar
         await bot.send_message(chat_id=target_id, text=msg.replace('*', ''))
 
 if __name__ == "__main__":
