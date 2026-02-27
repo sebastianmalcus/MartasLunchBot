@@ -10,7 +10,6 @@ TOKEN = os.getenv('TELEGRAM_TOKEN')
 CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 
 def get_day_info():
-    """Returnerar index (0-4) och både svenskt och engelskt namn för dagen."""
     days_sv = ["Måndag", "Tisdag", "Onsdag", "Torsdag", "Fredag"]
     days_en = ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY"]
     idx = datetime.now().weekday()
@@ -19,7 +18,6 @@ def get_day_info():
     return None, None, None
 
 def scrape_gabys(day_en):
-    """Skrapar Gaby's meny (Jacy'z) baserat på engelska veckodagar."""
     try:
         url = "https://jacyzhotel.com/restauranger-goteborg/gabys/"
         headers = {'User-Agent': 'Mozilla/5.0'}
@@ -30,26 +28,32 @@ def scrape_gabys(day_en):
         elements = soup.find_all(['span', 'p', 'h3', 'div'])
         menu = []
         found_day = False
-        all_days_en = ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY"]
+        all_days_en = ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY"]
 
         for el in elements:
             text = el.get_text(strip=True)
             if not text: continue
-            if text.upper() == day_en:
+            
+            # Starta om vi hittar dagen
+            if text.upper().startswith(day_en):
                 found_day = True
                 continue
+                
             if found_day:
-                if any(d == text.upper() for d in all_days_en if d != day_en):
+                # Sluta om vi når nästa dag
+                if any(text.upper().startswith(d) for d in all_days_en if d != day_en):
                     break
-                if len(text) > 15 and not any(d in text.upper() for d in all_days_en):
+                    
+                # FIX FÖR ONÖDIG TEXT: Filtrerar bort säljsnack genom att max tillåta 130 tecken per rad
+                if 15 < len(text) < 130 and not any(d in text.upper() for d in all_days_en):
                     menu.append(f"• {text}")
         
-        return "\n".join(menu[:4]) if menu else "🍴 Se menyn på Jacy'z hemsida."
+        # Begränsar till max 3 rätter så vi slipper eventuellt eftersläpande skräp
+        return "\n".join(menu[:3]) if menu else "🍴 Se menyn på Jacy'z hemsida."
     except Exception:
         return "⚠️ Gaby's: Kunde inte nå sidan."
 
 def scrape_matsmak(day_sv):
-    """Skrapar Matsmak genom att hantera <br>-taggar och prefix som BUDGET/KÖTT/FISK."""
     try:
         url = "https://matsmak.se/lunch/"
         headers = {'User-Agent': 'Mozilla/5.0'}
@@ -57,39 +61,35 @@ def scrape_matsmak(day_sv):
         res.encoding = 'utf-8'
         soup = BeautifulSoup(res.text, 'html.parser')
         
-        # Matsmak använder <br> för radbrytningar inuti <p>. 
-        # separator="\n" gör att vi får ut rätterna som separata rader.
-        content = soup.find('div', class_='entry-content') or soup
-        all_text = content.get_text(separator="\n", strip=True)
-        lines = [l.strip() for l in all_text.split('\n') if len(l.strip()) > 1]
-        
+        # Matsmak har varje dagsmeny i egna <p>-taggar enligt din Inspect-bild
+        paragraphs = soup.find_all('p')
         menu = []
-        found_day = False
-        all_days_sv = ["MÅNDAG", "TISDAG", "ONSDAG", "TORSDAG", "FREDAG"]
 
-        for line in lines:
-            # Matchar mot rubriken, t.ex. "TORSDAG"
-            if line.upper() == day_sv.upper():
-                found_day = True
-                continue
+        for p in paragraphs:
+            # Separera innehållet med radbrytning
+            text = p.get_text(separator="\n", strip=True)
+            lines = [l.strip() for l in text.split('\n') if len(l.strip()) > 1]
             
-            if found_day:
-                # Sluta om vi når nästa dag
-                if line.upper() in all_days_sv:
-                    break
+            if not lines: continue
+            
+            # Kollar om någon av de första raderna i stycket börjar med dagens namn
+            # (Fångar upp "FREDAG - Vi bjuder på..." och "FREDAGSLUNCH")
+            if any(line.upper().startswith(day_sv.upper()) for line in lines[:2]):
                 
-                # Prefix från din senaste skärmdump (nu inkluderat BUDGET)
-                prefixes = ["KÖTT:", "FISK:", "VEG:", "BUDGET:", "VECKANS:"]
+                # Vi har hittat rätt paragraf! Läs rätterna:
+                for line in lines:
+                    clean_line = line.replace('\xa0', ' ')
+                    prefixes = ["KÖTT:", "FISK:", "VEG:", "BUDGET:", "VECKANS:"]
+                    
+                    if any(p in clean_line.upper() for p in prefixes):
+                        menu.append(f"• {clean_line}")
+                    # Plocka långa rader som ser ut som mat, men undvik deras fredags-säljsnack
+                    elif len(clean_line) > 25 and ":" not in clean_line and "BJUDER" not in clean_line.upper():
+                        menu.append(f"• {clean_line}")
                 
-                # Tvätta texten från specialtecken (non-breaking spaces)
-                clean_line = line.replace('\xa0', ' ')
+                # När vi hittat och läst dagens paragraf behöver vi inte leta mer
+                break
                 
-                if any(p in clean_line.upper() for p in prefixes):
-                    menu.append(f"• {clean_line}")
-                # Fångar rader som är tydliga maträtter men saknar prefix (minst 25 tecken)
-                elif len(clean_line) > 25 and ":" not in clean_line:
-                    menu.append(f"• {clean_line}")
-        
         return "\n".join(menu) if menu else "⚠️ Hittade menyn men kunde inte extrahera rätterna."
     except Exception:
         return "⚠️ Matsmak: Kunde inte nå sidan."
@@ -100,7 +100,6 @@ async def main():
     
     bot = Bot(token=TOKEN)
     
-    # Tvinga Chat ID till siffra för att undvika API-fel
     try:
         target_id = int(str(CHAT_ID).strip())
     except Exception:
@@ -124,7 +123,6 @@ async def main():
         await bot.send_message(chat_id=target_id, text=msg, parse_mode='Markdown', disable_web_page_preview=True)
         print("✅ Success: Postat i gruppen!")
     except Exception:
-        # Fallback om specialtecken pajar Markdown-formateringen
         await bot.send_message(chat_id=target_id, text=msg.replace('*', ''))
 
 if __name__ == "__main__":
