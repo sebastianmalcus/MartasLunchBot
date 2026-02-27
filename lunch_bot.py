@@ -135,7 +135,7 @@ def scrape_village(day_sv):
         return f"⚠️ Systemfel på The Village: {e}"
 
 def scrape_hildas(day_sv):
-    """Skrapar Hildas genom att hitta deras menu_wrapper och p-taggar."""
+    """Skrapar Hildas genom att leta efter rätt h3-rubrik, oavsett om de lagt till extratext."""
     try:
         url = "https://hildasrestaurang.se/se/lunch-meny"
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
@@ -145,35 +145,40 @@ def scrape_hildas(day_sv):
         soup = BeautifulSoup(res.text, 'html.parser')
 
         menu = []
-        # Hitta alla block som innehåller en dag
-        wrappers = soup.find_all('div', class_='menu_wrapper')
         
-        for wrapper in wrappers:
-            h3 = wrapper.find('h3')
-            # Leta efter vår aktuella veckodag
-            if h3 and h3.get_text(strip=True).upper() == day_sv.upper():
+        # Leta igenom alla <h3>-rubriker på sidan
+        for h3 in soup.find_all('h3'):
+            h3_text = h3.get_text(strip=True).upper()
+            
+            # Om dagens namn (t.ex. "FREDAG") FINNS i rubriken (mjukare matchning)
+            if day_sv.upper() in h3_text:
                 
-                # Plocka ut titlar (t.ex. "Fläskkött") och innehåll (rätten)
+                # Klättra upp ett steg för att hitta hela lådan
+                wrapper = h3.find_parent('div', class_='menu_wrapper')
+                if not wrapper:
+                    wrapper = h3.parent # Fallback om klassnamnet ändrats
+                
+                # Leta specifikt efter <p>-taggarna du visade i bilden
                 titles = wrapper.find_all('p', class_='menus_title')
                 contents = wrapper.find_all('p', class_='menus_content')
                 
-                # Om de matchar i antal, klistra ihop dem snyggt!
-                if len(titles) == len(contents) and len(contents) > 0:
+                if titles and contents:
+                    # Matcha ihop dem snyggt
                     for t, c in zip(titles, contents):
                         t_text = t.get_text(strip=True)
                         c_text = c.get_text(strip=True)
                         if c_text:
-                            # *Gör titeln fetstilt* i Markdown
                             menu.append(f"• *{t_text}:* {c_text}")
                 else:
-                    # Fallback om de gjort fel på hemsidan: plocka bara ut maten
-                    for c in contents:
-                        c_text = c.get_text(strip=True)
-                        if c_text:
-                            menu.append(f"• {c_text}")
+                    # Nödlösning: Plocka all rimlig text från lådan
+                    for p in wrapper.find_all('p'):
+                        p_text = p.get_text(strip=True)
+                        if p_text and len(p_text) > 10:
+                            menu.append(f"• {p_text}")
                 
-                # Sidan använder en slider som skapar dubbletter, så när vi hittat EN onsdag avbryter vi!
-                break
+                # Om vi lyckades fylla på med mat, avbryt (för att undvika dolda kloner i karusellen)
+                if menu:
+                    break
                 
         return "\n".join(menu) if menu else "⚠️ Hittade inte dagens meny på Hildas."
     except Exception as e:
@@ -212,7 +217,7 @@ async def main():
         await bot.send_message(chat_id=target_id, text=msg, parse_mode='Markdown', disable_web_page_preview=True)
         print("✅ Success: Skickat med alla fyra restauranger!")
     except Exception:
-        # Om Hildas nya *Fetstil* bråkar
+        # Om Hildas nya *Fetstil* bråkar med Telegrams formatteringsregler
         await bot.send_message(chat_id=target_id, text=msg.replace('*', ''))
 
 if __name__ == "__main__":
