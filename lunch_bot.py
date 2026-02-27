@@ -25,31 +25,35 @@ def scrape_gabys(day_en):
         res.encoding = 'utf-8'
         soup = BeautifulSoup(res.text, 'html.parser')
         
-        elements = soup.find_all(['span', 'p', 'h3', 'div'])
+        # Läs in hela sidans text uppifrån och ner
+        lines = [line.strip() for line in soup.get_text(separator="\n").split("\n") if line.strip()]
+        
         menu = []
         found_day = False
         all_days_en = ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY"]
 
-        for el in elements:
-            text = el.get_text(strip=True)
-            if not text: continue
+        for line in lines:
+            upper_line = line.upper()
             
-            # Mjukare matchning: Kollar om "FRIDAY" finns i texten (fungerade i din första version)
-            if day_en in text.upper() and not found_day:
+            # 1. Hitta exakt rätt veckodag
+            if upper_line == day_en:
                 found_day = True
                 continue
                 
             if found_day:
-                # Bryt om vi ser nästa veckodag
-                if any(d in text.upper() for d in all_days_en if d != day_en):
+                # 2. Sluta leta om vi snubblar in på nästa veckodag
+                if upper_line in all_days_en:
                     break
                     
-                # Hård filtrering: Maträtten måste vara en rimlig längd. 
-                # Säljsnacket "What's for lunch..." är över 500 tecken långt, så det ignoreras.
-                if 15 < len(text) < 150:
-                    menu.append(f"• {text}")
-                
-                # Gaby's serverar alltid exakt 3 rätter. När vi har 3, sluta leta!
+                # 3. SPÄRR: Stanna direkt om vi når deras säljsnack (sidfoten)
+                if "WHAT'S FOR LUNCH" in upper_line or "JACY'Z" in upper_line:
+                    break
+                    
+                # 4. Plocka allt som ser ut som en maträtt (över 10 tecken)
+                if len(line) > 10:
+                    menu.append(f"• {line}")
+                    
+                # 5. SPÄRR: Gaby's har alltid max 3 rätter. Sen är vi klara!
                 if len(menu) == 3:
                     break
         
@@ -65,7 +69,6 @@ def scrape_matsmak(day_sv):
         res.encoding = 'utf-8'
         soup = BeautifulSoup(res.text, 'html.parser')
         
-        # Samla all text och dela på radbrytningar
         content = soup.find('div', class_='entry-content') or soup
         all_text = content.get_text(separator="\n", strip=True)
         lines = [l.strip() for l in all_text.split('\n') if len(l.strip()) > 1]
@@ -78,22 +81,18 @@ def scrape_matsmak(day_sv):
             clean_line = line.replace('\xa0', ' ')
             line_upper = clean_line.upper()
             
-            # Mjukare matchning: Hittar "FREDAG" även i "FREDAGSLUNCH FÖR 99 KR!"
             if day_sv.upper() in line_upper and not found_day:
                 found_day = True
                 continue
             
             if found_day:
-                # Sluta om vi ser en ny dag (t.ex. om vi kollar torsdag och hittar fredag)
                 if any(d in line_upper for d in all_days_sv if d != day_sv.upper()):
                     break
                 
-                # Sök på kända prefix
                 prefixes = ["KÖTT:", "FISK:", "VEG:", "BUDGET:", "VECKANS:"]
                 
                 if any(p in line_upper for p in prefixes):
                     menu.append(f"• {clean_line}")
-                # Plocka upp andra rimliga rätter, men undvik deras fredags-erbjudande-rader
                 elif len(clean_line) > 20 and ":" not in clean_line and not any(x in line_upper for x in ["BJUDER", "RABATT", "PRIS"]):
                     menu.append(f"• {clean_line}")
                     
@@ -128,7 +127,6 @@ async def main():
     
     try:
         await bot.send_message(chat_id=target_id, text=msg, parse_mode='Markdown', disable_web_page_preview=True)
-        print("✅ Success: Postat i gruppen!")
     except Exception:
         await bot.send_message(chat_id=target_id, text=msg.replace('*', ''))
 
