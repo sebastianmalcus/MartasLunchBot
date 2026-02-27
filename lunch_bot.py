@@ -148,7 +148,7 @@ def scrape_village(day_sv):
         return "⚠️ Systemfel på The Village."
 
 def scrape_hildas(day_sv):
-    """Skrapar Hildas exakt utifrån Inspect-bilden med header_wrapper."""
+    """Skrapar Hildas genom att exakt följa HTML-strukturen från Inspect-bilden."""
     try:
         url = "https://hildasrestaurang.se/se/lunch-meny"
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
@@ -159,43 +159,43 @@ def scrape_hildas(day_sv):
 
         menu = []
         
-        # 1. Leta upp alla header_wrappers (lådan där veckodagen står)
-        header_wrappers = soup.find_all('div', class_='header_wrapper')
-        
-        for hw in header_wrappers:
-            h3 = hw.find('h3')
-            
-            # 2. Kolla om denna header_wrapper tillhör vår aktuella dag (t.ex. FREDAG)
-            if h3 and day_sv.upper() in h3.get_text(strip=True).upper():
+        # 1. Hitta alla <h2>-rubriker på sidan
+        for h2 in soup.find_all('h2'):
+            # 2. Kolla om denna <h2> är dagens namn (t.ex. "Måndag")
+            if day_sv.upper() in h2.get_text(strip=True).upper():
                 
-                # 3. Vi backar ut till huvudlådan som innehåller både header och mat
-                parent_block = hw.parent
-                
-                # 4. Hämta maten! Titlarna ("Fläskkött") och innehållet ("Kebabkryddad...")
-                titles = parent_block.find_all('p', class_='menus_title')
-                contents = parent_block.find_all('p', class_='menus_content')
+                # 3. Hitta lådan som h2 ligger i (header-wrapper)
+                header_wrapper = h2.find_parent('div', class_='header-wrapper')
+                if not header_wrapper:
+                    continue
+                    
+                # 4. Maten ligger i nästa låda, som är ett "syskon" och heter menus__wrapper
+                menus_wrapper = header_wrapper.find_next_sibling('div', class_='menus__wrapper')
+                if not menus_wrapper:
+                    continue
+                    
+                # 5. Plocka ut alla titlar och innehåll (notera dubbla understreck!)
+                titles = menus_wrapper.find_all('p', class_='menus__title')
+                contents = menus_wrapper.find_all('p', class_='menus__content')
                 
                 if titles and contents:
-                    # Para ihop rubrik med rätt
                     for t, c in zip(titles, contents):
                         t_text = t.get_text(strip=True)
                         c_text = c.get_text(strip=True)
                         if c_text:
-                            # Formaterar titeln i fetstil (*)
+                            # Sätter *Fläskkött:* i fetstil!
                             menu.append(f"• *{t_text}:* {c_text}")
                 else:
-                    # Nödlösning: Plocka all text från blocket nedanför rubriken
-                    sibling = hw.find_next_sibling()
-                    if sibling:
-                        for p in sibling.find_all('p'):
-                            p_text = p.get_text(strip=True)
-                            if len(p_text) > 5:
-                                menu.append(f"• {p_text}")
-                
-                # Sidan använder en slider med dubbletter, avbryt när vi fyllt vår meny!
+                    # Nödlösning om de byter klassnamn inuti
+                    for p in menus_wrapper.find_all('p'):
+                        p_text = p.get_text(strip=True)
+                        if len(p_text) > 5:
+                            menu.append(f"• {p_text}")
+                            
+                # Bryt när vi hittat dagens meny för att undvika dubbletter från karusellen
                 if menu:
                     break
-                
+                    
         return "\n".join(menu) if menu else "⚠️ Hittade inte dagens meny på Hildas."
     except Exception as e:
         return f"⚠️ Systemfel på Hildas: {e}"
