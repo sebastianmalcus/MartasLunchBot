@@ -53,7 +53,7 @@ def scrape_gabys(day_en):
                 if len(line) > 10: menu.append(f"• {line}")
                 if len(menu) == 3: break
         
-        return "\n".join(menu) if menu else "🍴 Hittade inte dagens meny. Klicka på rubriken ovan."
+        return "\n".join(menu) if menu else "🍴 Hittade inte dagens meny. Klicka på länken."
     except Exception:
         return "⚠️ Gaby's: Kunde inte nå sidan."
 
@@ -154,28 +154,22 @@ def scrape_hildas(day_en):
 def get_random_quote():
     """Hämtar ett slumpmässigt citat via API och översätter till svenska on-the-fly."""
     try:
-        # 1. Hämta ett slumpmässigt engelskt citat från ZenQuotes
         res = requests.get("https://zenquotes.io/api/random", timeout=10)
         data = res.json()
         en_quote = data[0]['q']
         author = data[0]['a']
 
-        # 2. Översätt till svenska via Googles dolda (och gratis) översättnings-endpoint
         safe_text = urllib.parse.quote(en_quote)
         translate_url = f"https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=sv&dt=t&q={safe_text}"
         trans_res = requests.get(translate_url, timeout=10)
         
-        # Plockar ut den översatta texten ur svaret
         sv_quote = trans_res.json()[0][0][0]
-        
-        # Rensar eventuella specialtecken som kan krascha Telegrams Markdown
         sv_quote = sv_quote.replace('*', '').replace('_', '').replace('[', '').replace(']', '')
         author = author.replace('*', '').replace('_', '')
 
         return f"\"{sv_quote}\" – {author}"
-    except Exception as e:
-        # Säkerhetsnät om API:et ligger nere
-        return "Livet är osäkert. Ät desserten först. – Ernestine Ulmer"
+    except Exception:
+        return "\"Fokusera på hur långt du har kommit i livet istället för att titta på andras prestationer.\" – Lolly Daskal"
 
 async def main():
     day_idx, day_sv, day_en = get_day_info()
@@ -198,12 +192,21 @@ async def main():
     # Hämta dagens oändliga citat
     quote = get_random_quote()
     
+    # Det snygga original-upplägget med separata länkar!
     msg = (
         f"🏙️ *GÅRDA LUNCH - {day_sv.upper()}* 🏙️\n\n"
-        f"🍸 *[Gaby's (Jacy'z)](https://jacyzhotel.com/restauranger-goteborg/gabys/)*\n{gabys_text}\n\n"
-        f"🍲 *[Matsmak](https://matsmak.se/dagens-lunch/)*\n{matsmak_text}\n\n"
-        f"🏘️ *[The Village](https://www.compass-group.se/restauranger-och-menyer/ovriga-restauranger/village/village-restaurang/)*\n{village_text}\n\n"
-        f"🍽️ *[Hildas](https://hildasrestaurang.se/se/lunch-meny)*\n{hildas_text}\n\n"
+        f"🍸 *Gaby's (Jacy'z)*\n"
+        f"📍 [Se länk](https://jacyzhotel.com/restauranger-goteborg/gabys/)\n"
+        f"{gabys_text}\n\n"
+        f"🍲 *Matsmak*\n"
+        f"📍 [Se länk](https://matsmak.se/dagens-lunch/)\n"
+        f"{matsmak_text}\n\n"
+        f"🏘️ *The Village*\n"
+        f"📍 [Se länk](https://www.compass-group.se/restauranger-och-menyer/ovriga-restauranger/village/village-restaurang/)\n"
+        f"{village_text}\n\n"
+        f"🍽️ *Hildas*\n"
+        f"📍 [Se länk](https://hildasrestaurang.se/se/lunch-meny)\n"
+        f"{hildas_text}\n\n"
         "--- \n"
         f"_{quote}_\n\n"
         "Smaklig lunch! 😋"
@@ -211,9 +214,10 @@ async def main():
     
     try:
         await bot.send_message(chat_id=target_id, text=msg, parse_mode='Markdown', disable_web_page_preview=True)
-        print("✅ Success: Skickat med nya citatmaskinen!")
+        print("✅ Success: Skickat med snygga separata länkar!")
     except Exception as e:
         print(f"❌ Misslyckades med Markdown, provar utan: {e}")
+        # Säkerhets-fallback om Markdown bråkar
         safe_msg = msg.replace('*', '').replace('[', '').replace(']', '').replace('_', '')
         await bot.send_message(chat_id=target_id, text=safe_msg, disable_web_page_preview=True)
 
