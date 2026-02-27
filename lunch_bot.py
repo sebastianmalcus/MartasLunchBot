@@ -34,22 +34,26 @@ def scrape_gabys(day_en):
             text = el.get_text(strip=True)
             if not text: continue
             
-            # Starta om vi hittar dagen
-            if text.upper().startswith(day_en):
+            # Mjukare matchning: Kollar om "FRIDAY" finns i texten (fungerade i din första version)
+            if day_en in text.upper() and not found_day:
                 found_day = True
                 continue
                 
             if found_day:
-                # Sluta om vi når nästa dag
-                if any(text.upper().startswith(d) for d in all_days_en if d != day_en):
+                # Bryt om vi ser nästa veckodag
+                if any(d in text.upper() for d in all_days_en if d != day_en):
                     break
                     
-                # FIX FÖR ONÖDIG TEXT: Filtrerar bort säljsnack genom att max tillåta 130 tecken per rad
-                if 15 < len(text) < 130 and not any(d in text.upper() for d in all_days_en):
+                # Hård filtrering: Maträtten måste vara en rimlig längd. 
+                # Säljsnacket "What's for lunch..." är över 500 tecken långt, så det ignoreras.
+                if 15 < len(text) < 150:
                     menu.append(f"• {text}")
+                
+                # Gaby's serverar alltid exakt 3 rätter. När vi har 3, sluta leta!
+                if len(menu) == 3:
+                    break
         
-        # Begränsar till max 3 rätter så vi slipper eventuellt eftersläpande skräp
-        return "\n".join(menu[:3]) if menu else "🍴 Se menyn på Jacy'z hemsida."
+        return "\n".join(menu) if menu else "🍴 Se menyn på Jacy'z hemsida."
     except Exception:
         return "⚠️ Gaby's: Kunde inte nå sidan."
 
@@ -61,36 +65,39 @@ def scrape_matsmak(day_sv):
         res.encoding = 'utf-8'
         soup = BeautifulSoup(res.text, 'html.parser')
         
-        # Matsmak har varje dagsmeny i egna <p>-taggar enligt din Inspect-bild
-        paragraphs = soup.find_all('p')
+        # Samla all text och dela på radbrytningar
+        content = soup.find('div', class_='entry-content') or soup
+        all_text = content.get_text(separator="\n", strip=True)
+        lines = [l.strip() for l in all_text.split('\n') if len(l.strip()) > 1]
+        
         menu = []
+        found_day = False
+        all_days_sv = ["MÅNDAG", "TISDAG", "ONSDAG", "TORSDAG", "FREDAG"]
 
-        for p in paragraphs:
-            # Separera innehållet med radbrytning
-            text = p.get_text(separator="\n", strip=True)
-            lines = [l.strip() for l in text.split('\n') if len(l.strip()) > 1]
+        for line in lines:
+            clean_line = line.replace('\xa0', ' ')
+            line_upper = clean_line.upper()
             
-            if not lines: continue
+            # Mjukare matchning: Hittar "FREDAG" även i "FREDAGSLUNCH FÖR 99 KR!"
+            if day_sv.upper() in line_upper and not found_day:
+                found_day = True
+                continue
             
-            # Kollar om någon av de första raderna i stycket börjar med dagens namn
-            # (Fångar upp "FREDAG - Vi bjuder på..." och "FREDAGSLUNCH")
-            if any(line.upper().startswith(day_sv.upper()) for line in lines[:2]):
+            if found_day:
+                # Sluta om vi ser en ny dag (t.ex. om vi kollar torsdag och hittar fredag)
+                if any(d in line_upper for d in all_days_sv if d != day_sv.upper()):
+                    break
                 
-                # Vi har hittat rätt paragraf! Läs rätterna:
-                for line in lines:
-                    clean_line = line.replace('\xa0', ' ')
-                    prefixes = ["KÖTT:", "FISK:", "VEG:", "BUDGET:", "VECKANS:"]
+                # Sök på kända prefix
+                prefixes = ["KÖTT:", "FISK:", "VEG:", "BUDGET:", "VECKANS:"]
+                
+                if any(p in line_upper for p in prefixes):
+                    menu.append(f"• {clean_line}")
+                # Plocka upp andra rimliga rätter, men undvik deras fredags-erbjudande-rader
+                elif len(clean_line) > 20 and ":" not in clean_line and not any(x in line_upper for x in ["BJUDER", "RABATT", "PRIS"]):
+                    menu.append(f"• {clean_line}")
                     
-                    if any(p in clean_line.upper() for p in prefixes):
-                        menu.append(f"• {clean_line}")
-                    # Plocka långa rader som ser ut som mat, men undvik deras fredags-säljsnack
-                    elif len(clean_line) > 25 and ":" not in clean_line and "BJUDER" not in clean_line.upper():
-                        menu.append(f"• {clean_line}")
-                
-                # När vi hittat och läst dagens paragraf behöver vi inte leta mer
-                break
-                
-        return "\n".join(menu) if menu else "⚠️ Hittade menyn men kunde inte extrahera rätterna."
+        return "\n".join(menu) if menu else "⚠️ Hittade menyn men rätterna saknas."
     except Exception:
         return "⚠️ Matsmak: Kunde inte nå sidan."
 
