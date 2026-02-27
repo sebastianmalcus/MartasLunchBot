@@ -1,6 +1,8 @@
 import asyncio
 import requests
 import os
+import random
+import urllib.parse
 from bs4 import BeautifulSoup
 from datetime import datetime
 from telegram import Bot
@@ -51,7 +53,7 @@ def scrape_gabys(day_en):
                 if len(line) > 10: menu.append(f"• {line}")
                 if len(menu) == 3: break
         
-        return "\n".join(menu) if menu else "🍴 Se menyn på Jacy'z hemsida."
+        return "\n".join(menu) if menu else "🍴 Hittade inte dagens meny. Klicka på rubriken ovan."
     except Exception:
         return "⚠️ Gaby's: Kunde inte nå sidan."
 
@@ -118,25 +120,19 @@ def scrape_village(day_sv):
     except Exception: return "⚠️ Systemfel på The Village."
 
 def scrape_hildas(day_en):
-    """Hämtar Hildas meny blixtsnabbt och stabilt via deras osynliga API!"""
     try:
-        # Vi använder det osynliga API:et du hittade!
         url = "https://api.hildasrestaurang.se/wp-json/wp/v2/lunch?per_page=1"
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
         res = get_session().get(url, timeout=15, headers=headers)
         res.raise_for_status()
 
-        # Konvertera svaret till en Python-ordbok (JSON)
         data = res.json()
-        if not data:
-            return "⚠️ Hittade ingen meny i Hildas API."
+        if not data: return "⚠️ Hittade ingen meny i Hildas API."
 
-        # Veckans data ligger i det första (och enda) elementet
         latest_week = data[0]
         days = latest_week.get('acf', {}).get('days', [])
 
         menu = []
-        # API:et använder små bokstäver för dagarna (t.ex. "friday")
         target_day = day_en.lower() 
 
         for d in days:
@@ -144,19 +140,42 @@ def scrape_hildas(day_en):
                 dishes = d.get('menu', [])
                 for dish in dishes:
                     title = dish.get('title', '').strip()
-                    # Rensa bort alla onödiga radbrytningar (\r\n) som fanns i datan
                     text = " ".join(dish.get('text', '').split())
-
                     if title and text:
                         menu.append(f"• *{title}:* {text}")
                     elif text:
-                        # Fallback om rätten saknar "Fläskkött/Veg"-titel
                         menu.append(f"• {text}")
-                break # Vi hittade och la till maten, avbryt loopen
+                break 
 
         return "\n".join(menu) if menu else "⚠️ Hittade ingen mat för denna dag i Hildas API."
     except Exception as e:
         return f"⚠️ Systemfel på Hildas (API): {e}"
+
+def get_random_quote():
+    """Hämtar ett slumpmässigt citat via API och översätter till svenska on-the-fly."""
+    try:
+        # 1. Hämta ett slumpmässigt engelskt citat från ZenQuotes
+        res = requests.get("https://zenquotes.io/api/random", timeout=10)
+        data = res.json()
+        en_quote = data[0]['q']
+        author = data[0]['a']
+
+        # 2. Översätt till svenska via Googles dolda (och gratis) översättnings-endpoint
+        safe_text = urllib.parse.quote(en_quote)
+        translate_url = f"https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=sv&dt=t&q={safe_text}"
+        trans_res = requests.get(translate_url, timeout=10)
+        
+        # Plockar ut den översatta texten ur svaret
+        sv_quote = trans_res.json()[0][0][0]
+        
+        # Rensar eventuella specialtecken som kan krascha Telegrams Markdown
+        sv_quote = sv_quote.replace('*', '').replace('_', '').replace('[', '').replace(']', '')
+        author = author.replace('*', '').replace('_', '')
+
+        return f"\"{sv_quote}\" – {author}"
+    except Exception as e:
+        # Säkerhetsnät om API:et ligger nere
+        return "Livet är osäkert. Ät desserten först. – Ernestine Ulmer"
 
 async def main():
     day_idx, day_sv, day_en = get_day_info()
@@ -170,26 +189,33 @@ async def main():
         print("Kritisk Error: Ogiltigt Chat ID")
         return
 
-    # Ladda ner alla menyer (Notera att Hildas nu använder day_en istället för day_sv)
+    # Ladda ner alla menyer
     gabys_text = scrape_gabys(day_en)
     matsmak_text = scrape_matsmak(day_sv)
     village_text = scrape_village(day_sv)
     hildas_text = scrape_hildas(day_en)
     
+    # Hämta dagens oändliga citat
+    quote = get_random_quote()
+    
     msg = (
         f"🏙️ *GÅRDA LUNCH - {day_sv.upper()}* 🏙️\n\n"
-        f"🍸 *Gaby's (Jacy'z)*\n{gabys_text}\n\n"
-        f"🍲 *Matsmak*\n{matsmak_text}\n\n"
-        f"🏘️ *The Village*\n{village_text}\n\n"
-        f"🍽️ *Hildas*\n{hildas_text}\n\n"
+        f"🍸 *[Gaby's (Jacy'z)](https://jacyzhotel.com/restauranger-goteborg/gabys/)*\n{gabys_text}\n\n"
+        f"🍲 *[Matsmak](https://matsmak.se/dagens-lunch/)*\n{matsmak_text}\n\n"
+        f"🏘️ *[The Village](https://www.compass-group.se/restauranger-och-menyer/ovriga-restauranger/village/village-restaurang/)*\n{village_text}\n\n"
+        f"🍽️ *[Hildas](https://hildasrestaurang.se/se/lunch-meny)*\n{hildas_text}\n\n"
         "--- \n"
-        "Smaklig lunch!"
+        f"_{quote}_\n\n"
+        "Smaklig lunch! 😋"
     )
     
     try:
         await bot.send_message(chat_id=target_id, text=msg, parse_mode='Markdown', disable_web_page_preview=True)
-    except Exception:
-        await bot.send_message(chat_id=target_id, text=msg.replace('*', ''))
+        print("✅ Success: Skickat med nya citatmaskinen!")
+    except Exception as e:
+        print(f"❌ Misslyckades med Markdown, provar utan: {e}")
+        safe_msg = msg.replace('*', '').replace('[', '').replace(']', '').replace('_', '')
+        await bot.send_message(chat_id=target_id, text=safe_msg, disable_web_page_preview=True)
 
 if __name__ == "__main__":
     asyncio.run(main())
