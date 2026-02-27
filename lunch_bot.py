@@ -20,6 +20,7 @@ def get_day_info():
     return None, None, None
 
 def get_session():
+    """Skapar en request-session som automatiskt försöker igen om sidan är seg/strular."""
     session = requests.Session()
     retries = Retry(total=3, backoff_factor=1, status_forcelist=[500, 502, 503, 504])
     session.mount('https://', HTTPAdapter(max_retries=retries))
@@ -116,42 +117,46 @@ def scrape_village(day_sv):
         return "\n".join(menu) if menu else "⚠️ Hittade inte dagens meny på The Village."
     except Exception: return "⚠️ Systemfel på The Village."
 
-def scrape_hildas(day_sv):
-    """SUPER-DEBUG: Skriver ut källkoden runt dagens namn för att se om maten gömmer sig i en data-tagg eller JSON."""
+def scrape_hildas(day_en):
+    """Hämtar Hildas meny blixtsnabbt och stabilt via deras osynliga API!"""
     try:
-        url = "https://hildasrestaurang.se/se/lunch-meny"
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        # Vi använder det osynliga API:et du hittade!
+        url = "https://api.hildasrestaurang.se/wp-json/wp/v2/lunch?per_page=1"
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
         res = get_session().get(url, timeout=15, headers=headers)
         res.raise_for_status()
-        res.encoding = 'utf-8'
 
-        raw_html = res.text
-        
-        print("\n" + "="*60)
-        print(f"🕵️ SUPER DEBUG HILDAS FÖR: {day_sv.upper()}")
-        print("="*60)
-        
-        # Sök efter dagen (t.ex. "Fredag")
-        idx = raw_html.upper().find(day_sv.upper())
-        
-        if idx != -1:
-            # Plocka ut lite kod före och mycket kod efter ordet
-            start = max(0, idx - 300)
-            end = min(len(raw_html), idx + 3000)
-            print(f"✅ Hittade '{day_sv}'! Här är exakt vad boten ser i koden:")
-            print("\n[--- BÖRJAN AV RÅKOD ---]")
-            print(raw_html[start:end])
-            print("[--- SLUT PÅ RÅKOD ---]\n")
-        else:
-            print(f"❌ Hittade inte '{day_sv}' i källkoden överhuvudtaget.")
-            
-        print("="*60 + "\n")
+        # Konvertera svaret till en Python-ordbok (JSON)
+        data = res.json()
+        if not data:
+            return "⚠️ Hittade ingen meny i Hildas API."
 
-        # Boten returnerar detta till Telegram så länge vi debuggar
-        return "⚠️ Söker efter den dolda koden. Kolla GitHub Actions-loggen!"
-        
+        # Veckans data ligger i det första (och enda) elementet
+        latest_week = data[0]
+        days = latest_week.get('acf', {}).get('days', [])
+
+        menu = []
+        # API:et använder små bokstäver för dagarna (t.ex. "friday")
+        target_day = day_en.lower() 
+
+        for d in days:
+            if d.get('day') == target_day:
+                dishes = d.get('menu', [])
+                for dish in dishes:
+                    title = dish.get('title', '').strip()
+                    # Rensa bort alla onödiga radbrytningar (\r\n) som fanns i datan
+                    text = " ".join(dish.get('text', '').split())
+
+                    if title and text:
+                        menu.append(f"• *{title}:* {text}")
+                    elif text:
+                        # Fallback om rätten saknar "Fläskkött/Veg"-titel
+                        menu.append(f"• {text}")
+                break # Vi hittade och la till maten, avbryt loopen
+
+        return "\n".join(menu) if menu else "⚠️ Hittade ingen mat för denna dag i Hildas API."
     except Exception as e:
-        return f"⚠️ Systemfel på Hildas: {e}"
+        return f"⚠️ Systemfel på Hildas (API): {e}"
 
 async def main():
     day_idx, day_sv, day_en = get_day_info()
@@ -165,10 +170,11 @@ async def main():
         print("Kritisk Error: Ogiltigt Chat ID")
         return
 
+    # Ladda ner alla menyer (Notera att Hildas nu använder day_en istället för day_sv)
     gabys_text = scrape_gabys(day_en)
     matsmak_text = scrape_matsmak(day_sv)
     village_text = scrape_village(day_sv)
-    hildas_text = scrape_hildas(day_sv)
+    hildas_text = scrape_hildas(day_en)
     
     msg = (
         f"🏙️ *GÅRDA LUNCH - {day_sv.upper()}* 🏙️\n\n"
